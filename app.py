@@ -79,28 +79,28 @@ def send_zalo_message(recipient_id, message_text):
     if r.status_code != 200:
         print(f"ZALO: Lỗi khi gửi tin nhắn: {r.json()}")
 
-# --- PHẦN ĐÃ SỬA: ZALO WEBHOOK ---
+# --- PHẦN ĐÃ SỬA: ZALO WEBHOOK (Logic mới) ---
 @app.route('/zalo', methods=['POST'])
 def zalo_webhook():
-    """Webhook chỉ dành riêng cho Zalo."""
+    """Webhook chỉ dành riêng cho Zalo, với logic xử lý mạnh mẽ hơn."""
     data = request.get_json()
+    
+    # In ra để debug, bạn có thể xem trong Log của Render
     print(f"ZALO: Nhận được webhook: {data}")
 
-    # Xử lý yêu cầu xác thực từ Zalo (khi nhấn nút "Kiểm tra")
-    # Zalo sẽ gửi một yêu cầu với event_name là "user_send_text" và message là "test"
-    if data.get("event_name") == "user_send_text" and data.get("message", {}).get("text") == "test":
-        print("ZALO: Nhận được yêu cầu kiểm tra webhook. Phản hồi thành công.")
-        # Phản hồi lại với mã 200 OK để xác nhận
-        return "ok", 200
-
-    # Xử lý sự kiện người dùng gửi tin nhắn văn bản thật
-    if data.get("event_name") == "user_send_text":
+    # Chỉ xử lý nếu đây là sự kiện người dùng gửi tin nhắn văn bản
+    if data and data.get("event_name") == "user_send_text":
         sender_id = data["sender"]["id"]
         message_text = data["message"]["text"]
         
+        # Lấy câu trả lời từ Gemini
         gemini_answer = get_gemini_response(message_text)
+        # Gửi lại cho người dùng Zalo
         send_zalo_message(sender_id, gemini_answer)
         
+    # Đối với MỌI yêu cầu khác (bao gồm cả yêu cầu "Kiểm tra" hoặc các sự kiện không xác định),
+    # chúng ta sẽ trả về "ok" ngay lập tức để xác nhận với Zalo là đã nhận được.
+    # Đây là chìa khóa để vượt qua bước xác minh.
     return "ok", 200
 
 # --- HÀM XỬ LÝ TRUNG TÂM ---
