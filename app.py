@@ -1,6 +1,6 @@
 # --- Bước 1: Nhập các thư viện cần thiết ---
 import os
-from flask import Flask, request, send_from_directory, abort
+from flask import Flask, request, send_from_directory
 import requests
 from dotenv import load_dotenv
 import google.generativeai as genai
@@ -103,20 +103,17 @@ def get_gemini_response(prompt):
         print(f"GEMINI: Lỗi khi gọi API: {e}")
         return "Xin lỗi, tôi đang gặp một chút sự cố. Vui lòng thử lại sau."
 
-# --- PHẦN MỚI: XÁC THỰC DOMAIN CHO ZALO ---
+# --- PHẦN ĐÃ SỬA: XÁC THỰC DOMAIN CHO ZALO ---
 # Route này dùng để phục vụ file xác thực domain của Zalo.
 # Zalo sẽ yêu cầu truy cập file này từ đường dẫn gốc, ví dụ:
-# https://your-app.onrender.com/zalo-domain-verification-xxxx.html
+# https://your-app.onrender.com/ten-file-xac-thuc.html
 @app.route('/<path:filename>')
 def serve_static_file(filename):
-    # Chỉ phục vụ các file có tên theo định dạng của Zalo để bảo mật
-    if filename.startswith("zalo-domain-verification-"):
-        # Gửi file từ thư mục 'static'
-        # Bạn cần tạo một thư mục tên là 'static' và đặt file của Zalo vào đó
-        return send_from_directory('static', filename)
-    
-    # Nếu không phải file xác thực, trả về lỗi 404 để tránh truy cập trái phép
-    abort(404)
+    # Gửi file từ thư mục 'static'
+    # Bạn cần tạo một thư mục tên là 'static' và đặt file của Zalo vào đó.
+    # Flask sẽ tự động trả về lỗi 404 nếu không tìm thấy file.
+    print(f"ZALO VERIFY: Yêu cầu file: {filename}")
+    return send_from_directory('static', filename)
 
 # --- CHẠY SERVER ---
 if __name__ == '__main__':
