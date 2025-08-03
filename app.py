@@ -1,6 +1,6 @@
 # --- Bước 1: Nhập các thư viện cần thiết ---
 import os
-from flask import Flask, request
+from flask import Flask, request, send_from_directory, abort
 import requests
 from dotenv import load_dotenv
 import google.generativeai as genai
@@ -75,7 +75,6 @@ def send_zalo_message(recipient_id, message_text):
         "recipient": {"user_id": recipient_id},
         "message": {"text": message_text}
     }
-    # API gửi tin nhắn của Zalo OA API V4
     r = requests.post("https://openapi.zalo.me/v3.0/oa/message/cs", headers=headers, json=data)
     if r.status_code != 200:
         print(f"ZALO: Lỗi khi gửi tin nhắn: {r.json()}")
@@ -84,16 +83,12 @@ def send_zalo_message(recipient_id, message_text):
 def zalo_webhook():
     """Webhook chỉ dành riêng cho Zalo."""
     data = request.get_json()
-    print(f"ZALO: Nhận được webhook: {data}") # In ra để debug
-
-    # Xử lý sự kiện người dùng gửi tin nhắn văn bản
+    print(f"ZALO: Nhận được webhook: {data}")
     if data.get("event_name") == "user_send_text":
         sender_id = data["sender"]["id"]
         message_text = data["message"]["text"]
-        
         gemini_answer = get_gemini_response(message_text)
         send_zalo_message(sender_id, gemini_answer)
-        
     return "ok", 200
 
 # --- HÀM XỬ LÝ TRUNG TÂM ---
@@ -107,6 +102,21 @@ def get_gemini_response(prompt):
     except Exception as e:
         print(f"GEMINI: Lỗi khi gọi API: {e}")
         return "Xin lỗi, tôi đang gặp một chút sự cố. Vui lòng thử lại sau."
+
+# --- PHẦN MỚI: XÁC THỰC DOMAIN CHO ZALO ---
+# Route này dùng để phục vụ file xác thực domain của Zalo.
+# Zalo sẽ yêu cầu truy cập file này từ đường dẫn gốc, ví dụ:
+# https://your-app.onrender.com/zalo-domain-verification-xxxx.html
+@app.route('/<path:filename>')
+def serve_static_file(filename):
+    # Chỉ phục vụ các file có tên theo định dạng của Zalo để bảo mật
+    if filename.startswith("zalo-domain-verification-"):
+        # Gửi file từ thư mục 'static'
+        # Bạn cần tạo một thư mục tên là 'static' và đặt file của Zalo vào đó
+        return send_from_directory('static', filename)
+    
+    # Nếu không phải file xác thực, trả về lỗi 404 để tránh truy cập trái phép
+    abort(404)
 
 # --- CHẠY SERVER ---
 if __name__ == '__main__':
