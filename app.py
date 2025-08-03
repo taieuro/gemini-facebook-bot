@@ -79,16 +79,28 @@ def send_zalo_message(recipient_id, message_text):
     if r.status_code != 200:
         print(f"ZALO: Lỗi khi gửi tin nhắn: {r.json()}")
 
+# --- PHẦN ĐÃ SỬA: ZALO WEBHOOK ---
 @app.route('/zalo', methods=['POST'])
 def zalo_webhook():
     """Webhook chỉ dành riêng cho Zalo."""
     data = request.get_json()
     print(f"ZALO: Nhận được webhook: {data}")
+
+    # Xử lý yêu cầu xác thực từ Zalo (khi nhấn nút "Kiểm tra")
+    # Zalo sẽ gửi một yêu cầu với event_name là "user_send_text" và message là "test"
+    if data.get("event_name") == "user_send_text" and data.get("message", {}).get("text") == "test":
+        print("ZALO: Nhận được yêu cầu kiểm tra webhook. Phản hồi thành công.")
+        # Phản hồi lại với mã 200 OK để xác nhận
+        return "ok", 200
+
+    # Xử lý sự kiện người dùng gửi tin nhắn văn bản thật
     if data.get("event_name") == "user_send_text":
         sender_id = data["sender"]["id"]
         message_text = data["message"]["text"]
+        
         gemini_answer = get_gemini_response(message_text)
         send_zalo_message(sender_id, gemini_answer)
+        
     return "ok", 200
 
 # --- HÀM XỬ LÝ TRUNG TÂM ---
@@ -103,15 +115,9 @@ def get_gemini_response(prompt):
         print(f"GEMINI: Lỗi khi gọi API: {e}")
         return "Xin lỗi, tôi đang gặp một chút sự cố. Vui lòng thử lại sau."
 
-# --- PHẦN ĐÃ SỬA: XÁC THỰC DOMAIN CHO ZALO ---
-# Route này dùng để phục vụ file xác thực domain của Zalo.
-# Zalo sẽ yêu cầu truy cập file này từ đường dẫn gốc, ví dụ:
-# https://your-app.onrender.com/ten-file-xac-thuc.html
+# --- PHẦN XÁC THỰC DOMAIN CHO ZALO ---
 @app.route('/<path:filename>')
 def serve_static_file(filename):
-    # Gửi file từ thư mục 'static'
-    # Bạn cần tạo một thư mục tên là 'static' và đặt file của Zalo vào đó.
-    # Flask sẽ tự động trả về lỗi 404 nếu không tìm thấy file.
     print(f"ZALO VERIFY: Yêu cầu file: {filename}")
     return send_from_directory('static', filename)
 
