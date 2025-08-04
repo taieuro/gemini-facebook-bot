@@ -1,5 +1,6 @@
 # --- Bước 1: Nhập các thư viện cần thiết ---
 import os
+import json # Thư viện để xử lý JSON
 from flask import Flask, request
 import requests
 from dotenv import load_dotenv
@@ -8,8 +9,15 @@ import google.generativeai as genai
 # --- Bước 2: Tải các biến môi trường ---
 load_dotenv()
 VERIFY_TOKEN = os.getenv('VERIFY_TOKEN')
-PAGE_ACCESS_TOKEN = os.getenv('PAGE_ACCESS_TOKEN')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+
+# --- PHẦN MỚI: Tải và xử lý "chùm chìa khóa" cho nhiều Fanpage ---
+PAGE_TOKENS_JSON = os.getenv('PAGE_TOKENS_JSON')
+# Chuyển chuỗi JSON thành một dictionary trong Python
+# Ví dụ: {'PAGE_ID_1': 'TOKEN_1', 'PAGE_ID_2': 'TOKEN_2'}
+PAGE_TOKEN_MAP = json.loads(PAGE_TOKENS_JSON) if PAGE_TOKENS_JSON else {}
+if not PAGE_TOKEN_MAP:
+    print("Cảnh báo: Không tìm thấy PAGE_TOKENS_JSON. Bot sẽ không thể gửi tin nhắn.")
 
 # --- "CUỐN SÁCH KIẾN THỨC" CỦA BOT ---
 KNOWLEDGE_BASE = """
@@ -93,17 +101,20 @@ except Exception as e:
     print(f"Lỗi khi cấu hình Gemini: {e}")
     model = None
 
-# --- PHẦN MỚI: BỘ NHỚ CHO CÁC CUỘC HỘI THOẠI ---
-# Sử dụng một dictionary để lưu trữ các phiên trò chuyện (chat session)
-# cho từng người dùng, dựa trên sender_id của họ.
+# --- BỘ NHỚ CHO CÁC CUỘC HỘI THOẠI ---
 chat_sessions = {}
 
 # --- Bước 4: Khởi tạo ứng dụng Flask ---
 app = Flask(__name__)
 
-# --- Bước 5: Hàm gửi tin nhắn Facebook ---
-def send_message(recipient_id, message_text):
-    params = {"access_token": PAGE_ACCESS_TOKEN}
+# --- Bước 5: HÀM GỬI TIN NHẮN ĐÃ ĐƯỢC NÂNG CẤP ---
+def send_message(recipient_id, message_text, page_access_token):
+    """Hàm gửi tin nhắn, yêu cầu có Page Access Token cụ thể."""
+    if not page_access_token:
+        print("Lỗi: Không có Page Access Token để gửi tin nhắn.")
+        return
+        
+    params = {"access_token": page_access_token}
     headers = {"Content-Type": "application/json"}
     data = {
         "recipient": {"id": recipient_id},
@@ -114,29 +125,23 @@ def send_message(recipient_id, message_text):
     if r.status_code != 200:
         print(f"Lỗi khi gửi tin nhắn: {r.status_code} {r.text}")
 
-# --- Bước 6: HÀM GỌI GEMINI ĐÃ ĐƯỢC NÂNG CẤP ---
+# --- Bước 6: Hàm gọi Gemini ---
 def get_gemini_response(sender_id, prompt):
+    """Hàm lấy câu trả lời từ Gemini, có ghi nhớ lịch sử hội thoại."""
     if not model:
         return "Lỗi: Mô hình Gemini chưa được cấu hình."
-
-    # Kiểm tra xem đã có phiên trò chuyện cho người dùng này chưa
     if sender_id not in chat_sessions:
-        # Nếu chưa có, tạo một phiên mới và lưu vào "bộ nhớ"
-        print(f"Tạo phiên trò chuyện mới cho người dùng: {sender_id}")
         chat_sessions[sender_id] = model.start_chat(history=[])
     
-    # Lấy ra phiên trò chuyện của người dùng
     chat = chat_sessions[sender_id]
-
     try:
-        # Gửi tin nhắn mới vào phiên trò chuyện đã có (bao gồm cả lịch sử)
         response = chat.send_message(prompt)
         return response.text
     except Exception as e:
         print(f"Lỗi khi gọi API Gemini: {e}")
         return "Xin lỗi, tôi đang gặp một chút sự cố."
 
-# --- Bước 7: WEBHOOK ENDPOINT ĐÃ ĐƯỢC NÂNG CẤP ---
+# --- Bước 7: WEBHOOK ENDPOINT ĐÃ ĐƯỢC NÂNG CẤP TOÀN DIỆN ---
 @app.route('/', methods=['GET', 'POST'])
 def webhook():
     if request.method == 'GET':
@@ -148,14 +153,23 @@ def webhook():
         data = request.get_json()
         if data.get("object") == "page":
             for entry in data.get("entry", []):
+                # Lấy Page ID từ dữ liệu webhook để biết tin nhắn đến từ trang nào
+                page_id = entry.get("id")
+                # Lấy "chìa khóa" (token) tương ứng từ "chùm chìa khóa" đã lưu
+                page_access_token = PAGE_TOKEN_MAP.get(page_id)
+
+                if not page_access_token:
+                    print(f"Cảnh báo: Không tìm thấy token cho Page ID {page_id}. Bỏ qua tin nhắn.")
+                    continue # Bỏ qua và xử lý tin nhắn từ trang khác
+
                 for messaging_event in entry.get("messaging", []):
                     if messaging_event.get("message"):
                         sender_id = messaging_event["sender"]["id"]
                         message_text = messaging_event["message"].get("text")
                         if message_text:
-                            # Nâng cấp: Truyền cả sender_id vào hàm get_gemini_response
                             gemini_answer = get_gemini_response(sender_id, message_text)
-                            send_message(sender_id, gemini_answer)
+                            # Gửi tin nhắn đi với "chìa khóa" của đúng trang đó
+                            send_message(sender_id, gemini_answer, page_access_token)
         return "ok", 200
 
 # --- Bước 8: Chạy server ---
