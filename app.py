@@ -11,10 +11,7 @@ VERIFY_TOKEN = os.getenv('VERIFY_TOKEN')
 PAGE_ACCESS_TOKEN = os.getenv('PAGE_ACCESS_TOKEN')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
-# --- PHẦN MỚI: "CUỐN SÁCH KIẾN THỨC" CỦA BOT ---
-#
-# Đây là cơ sở dữ liệu kiến thức đã được tinh chỉnh cho Xưởng may Quà Tặng Thành Công.
-#
+# --- "CUỐN SÁCH KIẾN THỨC" CỦA BOT ---
 KNOWLEDGE_BASE = """
 # Thông tin chung
 - Tên công ty: Xưởng sản xuất túi vải Quà Tặng Thành Công.
@@ -45,10 +42,7 @@ KNOWLEDGE_BASE = """
 - Email: quatangthanhcong@gmail.com
 """
 
-# --- PHẦN MỚI: "BỘ QUY TẮC" CHO BOT (SYSTEM INSTRUCTIONS) ---
-#
-# Đây là những chỉ dẫn và quy trình đã được hệ thống hóa cho Gemini.
-#
+# --- "BỘ QUY TẮC" CHO BOT (SYSTEM INSTRUCTIONS) ---
 SYSTEM_INSTRUCTION = f"""
 # VAI TRÒ VÀ MỤC TIÊU
 - **Tên của bạn là Minh Châu.** Bạn là một tư vấn viên chuyên nghiệp, KHÔNG phải là AI hay bot.
@@ -57,7 +51,7 @@ SYSTEM_INSTRUCTION = f"""
 
 # QUY TRÌNH TƯ VẤN BẮT BUỘC
 Bạn phải tuân thủ nghiêm ngặt quy trình từng bước sau, với phong cách giao tiếp tự nhiên như con người:
-1.  **Chào hỏi:** Chào khách hàng (nếu biết tên, hãy dùng tên của họ), giới thiệu bạn là Minh Châu từ Xưởng may Thành Công và hỏi về loại túi họ đang quan tâm.
+1.  **Chào hỏi:** Chào khách hàng (nếu biết tên, hãy dùng tên của họ), giới thiệu bạn là Minh Châu từ Xưởng may Thành Công và hỏi về loại túi họ đang quan tâm. Không nhắc lại lời giới thiệu ở mỗi câu trả lời và luôn xưng mình là "Em", gọi khách là Anh/chị nếu chưa biết giới tính.
 2.  **Hỏi Số Lượng & MOQ:** Hỏi khách cần may bao nhiêu túi. Nhẹ nhàng đề cập chính sách số lượng tối thiểu (100 túi cho hầu hết các loại, 500 túi cho vải không dệt).
 3.  **Hỏi Ngân Sách:** Khéo léo hỏi về ngân sách dự kiến của khách hàng. Đây là thông tin quan trọng nhất để tư vấn.
 4.  **Xử lý MOQ:**
@@ -87,10 +81,9 @@ Bạn phải tuân thủ nghiêm ngặt quy trình từng bước sau, với pho
 ---
 """
 
-# --- Bước 3: Cấu hình mô hình Gemini với BỘ QUY TẮC MỚI ---
+# --- Bước 3: Cấu hình mô hình Gemini ---
 try:
     genai.configure(api_key=GEMINI_API_KEY)
-    # Nâng cấp: Thêm system_instruction vào khi khởi tạo model
     model = genai.GenerativeModel(
         model_name='gemini-2.5-flash',
         system_instruction=SYSTEM_INSTRUCTION
@@ -100,10 +93,15 @@ except Exception as e:
     print(f"Lỗi khi cấu hình Gemini: {e}")
     model = None
 
-# --- Bước 4: Khởi tạo ứng dụng Flask (Không thay đổi) ---
+# --- PHẦN MỚI: BỘ NHỚ CHO CÁC CUỘC HỘI THOẠI ---
+# Sử dụng một dictionary để lưu trữ các phiên trò chuyện (chat session)
+# cho từng người dùng, dựa trên sender_id của họ.
+chat_sessions = {}
+
+# --- Bước 4: Khởi tạo ứng dụng Flask ---
 app = Flask(__name__)
 
-# --- Bước 5: Hàm gửi tin nhắn Facebook (Không thay đổi) ---
+# --- Bước 5: Hàm gửi tin nhắn Facebook ---
 def send_message(recipient_id, message_text):
     params = {"access_token": PAGE_ACCESS_TOKEN}
     headers = {"Content-Type": "application/json"}
@@ -116,18 +114,29 @@ def send_message(recipient_id, message_text):
     if r.status_code != 200:
         print(f"Lỗi khi gửi tin nhắn: {r.status_code} {r.text}")
 
-# --- Bước 6: Hàm gọi Gemini (Không thay đổi) ---
-def get_gemini_response(prompt):
+# --- Bước 6: HÀM GỌI GEMINI ĐÃ ĐƯỢC NÂNG CẤP ---
+def get_gemini_response(sender_id, prompt):
     if not model:
         return "Lỗi: Mô hình Gemini chưa được cấu hình."
+
+    # Kiểm tra xem đã có phiên trò chuyện cho người dùng này chưa
+    if sender_id not in chat_sessions:
+        # Nếu chưa có, tạo một phiên mới và lưu vào "bộ nhớ"
+        print(f"Tạo phiên trò chuyện mới cho người dùng: {sender_id}")
+        chat_sessions[sender_id] = model.start_chat(history=[])
+    
+    # Lấy ra phiên trò chuyện của người dùng
+    chat = chat_sessions[sender_id]
+
     try:
-        response = model.generate_content(prompt)
+        # Gửi tin nhắn mới vào phiên trò chuyện đã có (bao gồm cả lịch sử)
+        response = chat.send_message(prompt)
         return response.text
     except Exception as e:
         print(f"Lỗi khi gọi API Gemini: {e}")
         return "Xin lỗi, tôi đang gặp một chút sự cố."
 
-# --- Bước 7: Webhook Endpoint (Không thay đổi) ---
+# --- Bước 7: WEBHOOK ENDPOINT ĐÃ ĐƯỢC NÂNG CẤP ---
 @app.route('/', methods=['GET', 'POST'])
 def webhook():
     if request.method == 'GET':
@@ -144,10 +153,11 @@ def webhook():
                         sender_id = messaging_event["sender"]["id"]
                         message_text = messaging_event["message"].get("text")
                         if message_text:
-                            gemini_answer = get_gemini_response(message_text)
+                            # Nâng cấp: Truyền cả sender_id vào hàm get_gemini_response
+                            gemini_answer = get_gemini_response(sender_id, message_text)
                             send_message(sender_id, gemini_answer)
         return "ok", 200
 
-# --- Bước 8: Chạy server (Không thay đổi) ---
+# --- Bước 8: Chạy server ---
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001, debug=True)
