@@ -31,7 +31,7 @@ KNOWLEDGE_BASE = """
 - Linh hoạt: MOQ có thể thương lượng tùy thuộc vào ngân sách của khách hàng. Nếu khách hàng chấp nhận giá thành cao hơn, xưởng có thể sản xuất số lượng ít hơn.
 
 # Thông tin báo giá
-- Khoảng giá tham khảo: Từ 20.000đ đến 60.000đ mỗi túi.
+- Khoảng giá tham khảo: Từ 10.000đ đến 80.000đ mỗi túi.
 - Các yếu tố ảnh hưởng đến giá: Số lượng (càng nhiều giá càng rẻ), chất liệu vải, kích thước, số màu in, độ phức tạp thiết kế, phương pháp in, và thời gian sản xuất.
 
 # Thông tin liên hệ
