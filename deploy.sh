@@ -48,8 +48,9 @@ echo "------------------------------------"
 
 # Bước 1: Cập nhật các cài đặt (secrets) trên Fly.io
 echo "⚙️  Đang cập nhật cài đặt bot trên Fly.io..."
-fly secrets set HUMAN_TAKEOVER_ENABLED="$TAKEOVER_ENABLED" -q
-fly secrets set BOT_RESUME_MINUTES="$RESUME_MINUTES" -q
+# ĐÃ SỬA LỖI: Loại bỏ cờ -q không hợp lệ
+fly secrets set HUMAN_TAKEOVER_ENABLED="$TAKEOVER_ENABLED"
+fly secrets set BOT_RESUME_MINUTES="$RESUME_MINUTES"
 echo "    - Tự động dừng khi nhân viên chat: $TAKEOVER_ENABLED"
 echo "    - Tự động mở lại sau: $RESUME_MINUTES phút"
 
