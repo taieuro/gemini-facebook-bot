@@ -232,4 +232,7 @@ def webhook():
 
 # --- Bước 8: Chạy server ---
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    # SỬA LỖI: Lấy cổng từ biến môi trường của Fly.io, nếu không có thì mặc định là 8080
+    port = int(os.environ.get("PORT", 8080))
+    # Tắt chế độ debug khi triển khai thật
+    app.run(host='0.0.0.0', port=port, debug=False)
