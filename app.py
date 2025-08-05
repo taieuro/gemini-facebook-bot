@@ -5,7 +5,8 @@ from flask import Flask, request
 import requests
 from dotenv import load_dotenv
 import google.generativeai as genai
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo # Thư viện để xử lý múi giờ
 
 # --- Bước 2: Tải các biến môi trường ---
 load_dotenv()
@@ -178,11 +179,16 @@ def webhook():
                     # Xử lý tin nhắn do NHÂN VIÊN gửi (message_echoes)
                     if messaging_event.get("message", {}).get("is_echo") and HUMAN_TAKEOVER_ENABLED:
                         sender_id = messaging_event["recipient"]["id"] # ID của khách hàng
-                        print(f"Phát hiện tin nhắn từ nhân viên tới khách hàng {sender_id}. Chuyển sang chế độ HUMAN_CONTROL.")
+                        # Nâng cấp: Sử dụng múi giờ Việt Nam để hiển thị log
+                        vn_time = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).strftime('%H:%M:%S')
+                        print(f"Phát hiện tin nhắn từ nhân viên lúc {vn_time} (giờ VN). Chuyển sang chế độ HUMAN_CONTROL cho khách hàng {sender_id}.")
+                        
                         if sender_id not in conversation_states:
                              conversation_states[sender_id] = {'chat': model.start_chat(history=[]), 'control': 'BOT', 'last_human_timestamp': None, 'user_name': None}
+                        
                         conversation_states[sender_id]['control'] = 'HUMAN'
-                        conversation_states[sender_id]['last_human_timestamp'] = datetime.utcnow()
+                        # Nâng cấp: Lưu thời gian theo múi giờ UTC chuẩn
+                        conversation_states[sender_id]['last_human_timestamp'] = datetime.now(timezone.utc)
                         continue
 
                     # Xử lý tin nhắn do KHÁCH HÀNG gửi
@@ -209,9 +215,11 @@ def webhook():
                         if current_state['control'] == 'HUMAN' and HUMAN_TAKEOVER_ENABLED:
                             should_bot_reply = False
                             if current_state['last_human_timestamp']:
-                                time_since_human = datetime.utcnow() - current_state['last_human_timestamp']
+                                # Nâng cấp: So sánh thời gian theo múi giờ UTC chuẩn
+                                time_since_human = datetime.now(timezone.utc) - current_state['last_human_timestamp']
                                 if time_since_human > timedelta(minutes=BOT_RESUME_MINUTES):
-                                    print(f"Thời gian chờ đã hết. Bot giành lại quyền kiểm soát từ nhân viên cho khách hàng {sender_id}.")
+                                    vn_time = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).strftime('%H:%M:%S')
+                                    print(f"Thời gian chờ đã hết lúc {vn_time} (giờ VN). Bot giành lại quyền kiểm soát cho khách hàng {sender_id}.")
                                     current_state['control'] = 'BOT'
                                     should_bot_reply = True
 
@@ -232,7 +240,5 @@ def webhook():
 
 # --- Bước 8: Chạy server ---
 if __name__ == '__main__':
-    # SỬA LỖI: Lấy cổng từ biến môi trường của Fly.io, nếu không có thì mặc định là 8080
     port = int(os.environ.get("PORT", 8080))
-    # Tắt chế độ debug khi triển khai thật
     app.run(host='0.0.0.0', port=port, debug=False)
