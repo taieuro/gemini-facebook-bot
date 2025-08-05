@@ -5,7 +5,7 @@ from flask import Flask, request
 import requests
 from dotenv import load_dotenv
 import google.generativeai as genai
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta # <-- Thêm thư viện thời gian
 
 # --- Bước 2: Tải các biến môi trường ---
 load_dotenv()
@@ -13,7 +13,7 @@ VERIFY_TOKEN = os.getenv('VERIFY_TOKEN')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 PAGE_TOKENS_JSON = os.getenv('PAGE_TOKENS_JSON')
 
-# Tải các tùy chọn cấu hình cho tính năng Human Takeover
+# --- PHẦN MỚI: Tải các tùy chọn cấu hình ---
 HUMAN_TAKEOVER_ENABLED = os.getenv('HUMAN_TAKEOVER_ENABLED', 'false').lower() == 'true'
 BOT_RESUME_MINUTES = int(os.getenv('BOT_RESUME_MINUTES', '30'))
 
@@ -22,6 +22,7 @@ PAGE_TOKEN_MAP = json.loads(PAGE_TOKENS_JSON) if PAGE_TOKENS_JSON else {}
 if not PAGE_TOKEN_MAP:
     print("Cảnh báo: Không tìm thấy PAGE_TOKENS_JSON. Bot sẽ không thể gửi tin nhắn.")
 
+# --- "CUỐN SÁCH KIẾN THỨC" VÀ "BỘ QUY TẮC" CỦA BOT (Không thay đổi) ---
 # --- "CUỐN SÁCH KIẾN THỨC" CỦA BOT ---
 KNOWLEDGE_BASE = """
 # Thông tin chung
@@ -52,7 +53,6 @@ KNOWLEDGE_BASE = """
 - Zalo tư vấn: 0835130333
 - Email: quatangthanhcong@gmail.com
 """
-
 # --- "BỘ QUY TẮC" CHO BOT (SYSTEM INSTRUCTIONS) ---
 SYSTEM_INSTRUCTION = f"""
 # VAI TRÒ VÀ MỤC TIÊU
@@ -91,8 +91,7 @@ Bạn phải tuân thủ nghiêm ngặt quy trình từng bước sau, với pho
 {KNOWLEDGE_BASE}
 ---
 """
-
-# --- Bước 3: Cấu hình mô hình Gemini ---
+# --- Bước 3: Cấu hình mô hình Gemini (Không thay đổi) ---
 try:
     genai.configure(api_key=GEMINI_API_KEY)
     model = genai.GenerativeModel(
@@ -104,33 +103,14 @@ except Exception as e:
     print(f"Lỗi khi cấu hình Gemini: {e}")
     model = None
 
-# --- BỘ NHỚ TRẠNG THÁI HỘI THOẠI ---
+# --- PHẦN NÂNG CẤP: BỘ NHỚ TRẠNG THÁI HỘI THOẠI ---
+# Giờ đây, bộ nhớ sẽ lưu cả phiên chat, quyền kiểm soát và thời gian
 conversation_states = {}
 
-# --- Bước 4: Khởi tạo ứng dụng Flask ---
+# --- Bước 4: Khởi tạo ứng dụng Flask (Không thay đổi) ---
 app = Flask(__name__)
 
-# --- HÀM LẤY THÔNG TIN NGƯỜI DÙNG TỪ FACEBOOK ---
-def get_user_profile(sender_id, page_access_token):
-    """Gọi Graph API để lấy họ và tên của người dùng."""
-    try:
-        r = requests.get(
-            f"https://graph.facebook.com/v19.0/{sender_id}",
-            params={
-                "fields": "first_name,last_name",
-                "access_token": page_access_token
-            }
-        )
-        if r.status_code == 200:
-            user_profile = r.json()
-            return f"{user_profile.get('first_name', '')} {user_profile.get('last_name', '')}".strip()
-        else:
-            print(f"Lỗi khi lấy thông tin người dùng: {r.status_code} {r.text}")
-    except Exception as e:
-        print(f"Ngoại lệ khi lấy thông tin người dùng: {e}")
-    return None
-
-# --- Bước 5: Hàm gửi tin nhắn Facebook ---
+# --- Bước 5: Hàm gửi tin nhắn Facebook (Không thay đổi) ---
 def send_message(recipient_id, message_text, page_access_token):
     if not page_access_token:
         print("Lỗi: Không có Page Access Token để gửi tin nhắn.")
@@ -148,6 +128,7 @@ def send_message(recipient_id, message_text, page_access_token):
 
 # --- Bước 6: Hàm gọi Gemini (có ghi nhớ) ---
 def get_gemini_response(sender_id, prompt):
+    # Lấy ra phiên trò chuyện của người dùng từ bộ nhớ trạng thái
     chat = conversation_states[sender_id]['chat']
     try:
         response = chat.send_message(prompt)
@@ -172,64 +153,51 @@ def webhook():
                 page_id = entry.get("id")
                 page_access_token = PAGE_TOKEN_MAP.get(page_id)
                 if not page_access_token:
+                    print(f"Cảnh báo: Không tìm thấy token cho Page ID {page_id}.")
                     continue
 
                 for messaging_event in entry.get("messaging", []):
-                    # Xử lý tin nhắn do NHÂN VIÊN gửi (message_echoes)
+                    # --- LOGIC MỚI: Xử lý tin nhắn do NHÂN VIÊN gửi (message_echoes) ---
                     if messaging_event.get("message", {}).get("is_echo") and HUMAN_TAKEOVER_ENABLED:
                         sender_id = messaging_event["recipient"]["id"] # ID của khách hàng
                         print(f"Phát hiện tin nhắn từ nhân viên tới khách hàng {sender_id}. Chuyển sang chế độ HUMAN_CONTROL.")
                         if sender_id not in conversation_states:
-                             conversation_states[sender_id] = {'chat': model.start_chat(history=[]), 'control': 'BOT', 'last_human_timestamp': None, 'user_name': None}
+                             conversation_states[sender_id] = {'chat': model.start_chat(history=[]), 'control': 'BOT', 'last_human_timestamp': None}
                         conversation_states[sender_id]['control'] = 'HUMAN'
                         conversation_states[sender_id]['last_human_timestamp'] = datetime.utcnow()
-                        continue
+                        continue # Bỏ qua, không xử lý gì thêm
 
-                    # Xử lý tin nhắn do KHÁCH HÀNG gửi
+                    # --- LOGIC MỚI: Xử lý tin nhắn do KHÁCH HÀNG gửi ---
                     if messaging_event.get("message") and not messaging_event.get("message", {}).get("is_echo"):
                         sender_id = messaging_event["sender"]["id"]
                         message_text = messaging_event["message"].get("text")
 
                         # Khởi tạo trạng thái nếu chưa có
-                        is_new_conversation = sender_id not in conversation_states
-                        if is_new_conversation:
-                            user_name = get_user_profile(sender_id, page_access_token)
-                            print(f"Tạo trạng thái và phiên chat mới cho khách hàng {sender_id} (Tên: {user_name}).")
-                            conversation_states[sender_id] = {
-                                'chat': model.start_chat(history=[]),
-                                'control': 'BOT',
-                                'last_human_timestamp': None,
-                                'user_name': user_name
-                            }
+                        if sender_id not in conversation_states:
+                            print(f"Tạo trạng thái và phiên chat mới cho khách hàng {sender_id}.")
+                            conversation_states[sender_id] = {'chat': model.start_chat(history=[]), 'control': 'BOT', 'last_human_timestamp': None}
 
                         current_state = conversation_states[sender_id]
                         
                         # Kiểm tra xem bot có nên trả lời không
                         should_bot_reply = True
                         if current_state['control'] == 'HUMAN' and HUMAN_TAKEOVER_ENABLED:
-                            should_bot_reply = False
-                            if current_state['last_human_timestamp']:
-                                time_since_human = datetime.utcnow() - current_state['last_human_timestamp']
-                                if time_since_human > timedelta(minutes=BOT_RESUME_MINUTES):
-                                    print(f"Thời gian chờ đã hết. Bot giành lại quyền kiểm soát từ nhân viên cho khách hàng {sender_id}.")
-                                    current_state['control'] = 'BOT'
-                                    should_bot_reply = True
+                            should_bot_reply = False # Mặc định là không trả lời
+                            time_since_human = datetime.utcnow() - current_state['last_human_timestamp']
+                            if time_since_human > timedelta(minutes=BOT_RESUME_MINUTES):
+                                print(f"Thời gian chờ đã hết. Bot giành lại quyền kiểm soát từ nhân viên cho khách hàng {sender_id}.")
+                                current_state['control'] = 'BOT'
+                                should_bot_reply = True
 
                         if message_text and should_bot_reply:
-                            prompt_to_send = message_text
-                            # "Mớm" tên cho Gemini ở tin nhắn đầu tiên
-                            if is_new_conversation and current_state.get('user_name'):
-                                user_name = current_state['user_name']
-                                prompt_to_send = f"(Tên khách hàng là {user_name}) {message_text}"
-
                             print(f"Bot đang trả lời khách hàng {sender_id}.")
-                            gemini_answer = get_gemini_response(sender_id, prompt_to_send)
+                            gemini_answer = get_gemini_response(sender_id, message_text)
                             send_message(sender_id, gemini_answer, page_access_token)
                         else:
                             print(f"Bot đang im lặng vì nhân viên đang xử lý khách hàng {sender_id}.")
 
         return "ok", 200
 
-# --- Bước 8: Chạy server ---
+# --- Bước 8: Chạy server (Không thay đổi) ---
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001, debug=True)
