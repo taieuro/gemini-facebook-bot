@@ -6,7 +6,7 @@ import requests
 from dotenv import load_dotenv
 import google.generativeai as genai
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo # Thư viện để xử lý múi giờ
+from zoneinfo import ZoneInfo
 
 # --- Bước 2: Tải các biến môi trường ---
 load_dotenv()
@@ -179,7 +179,6 @@ def webhook():
                     # Xử lý tin nhắn do NHÂN VIÊN gửi (message_echoes)
                     if messaging_event.get("message", {}).get("is_echo") and HUMAN_TAKEOVER_ENABLED:
                         sender_id = messaging_event["recipient"]["id"] # ID của khách hàng
-                        # Nâng cấp: Sử dụng múi giờ Việt Nam để hiển thị log
                         vn_time = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).strftime('%H:%M:%S')
                         print(f"Phát hiện tin nhắn từ nhân viên lúc {vn_time} (giờ VN). Chuyển sang chế độ HUMAN_CONTROL cho khách hàng {sender_id}.")
                         
@@ -187,7 +186,6 @@ def webhook():
                              conversation_states[sender_id] = {'chat': model.start_chat(history=[]), 'control': 'BOT', 'last_human_timestamp': None, 'user_name': None}
                         
                         conversation_states[sender_id]['control'] = 'HUMAN'
-                        # Nâng cấp: Lưu thời gian theo múi giờ UTC chuẩn
                         conversation_states[sender_id]['last_human_timestamp'] = datetime.now(timezone.utc)
                         continue
 
@@ -215,7 +213,6 @@ def webhook():
                         if current_state['control'] == 'HUMAN' and HUMAN_TAKEOVER_ENABLED:
                             should_bot_reply = False
                             if current_state['last_human_timestamp']:
-                                # Nâng cấp: So sánh thời gian theo múi giờ UTC chuẩn
                                 time_since_human = datetime.now(timezone.utc) - current_state['last_human_timestamp']
                                 if time_since_human > timedelta(minutes=BOT_RESUME_MINUTES):
                                     vn_time = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).strftime('%H:%M:%S')
@@ -238,7 +235,9 @@ def webhook():
 
         return "ok", 200
 
-# --- Bước 8: Chạy server ---
+# --- Bước 8: Chạy server (Đã được Gunicorn quản lý) ---
+# Dòng 'if __name__ == '__main__':' không còn cần thiết khi triển khai với Gunicorn,
+# nhưng chúng ta giữ lại để có thể chạy thử nghiệm trên máy cá nhân một cách dễ dàng.
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    # Cổng 5001 này chỉ dùng khi chạy trên máy Mac của bạn
+    app.run(host='0.0.0.0', port=5001, debug=True)
