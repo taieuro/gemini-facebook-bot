@@ -1,18 +1,20 @@
-# syntax=docker/dockerfile:1
+# Dockerfile for a production-ready Python Gunicorn app
 
-ARG PYTHON_VERSION=3.12.0
+# Use an official Python runtime as a parent image
+FROM python:3.12-slim
 
-FROM python:${PYTHON_VERSION}-slim
-
-LABEL fly_launch_runtime="flask"
-
+# Set the working directory in the container
 WORKDIR /code
 
+# Copy the requirements file into the container
 COPY requirements.txt requirements.txt
-RUN pip3 install -r requirements.txt
 
+# Install any needed packages specified in requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the application's code into the container
 COPY . .
 
-EXPOSE 8080
-
-CMD [ "python3", "-m" , "flask", "run", "--host=0.0.0.0", "--port=8080"]
+# Command to run the application using Gunicorn
+# This is the production-ready command that will be executed.
+CMD ["gunicorn", "--bind", ":8080", "--workers", "1", "--threads", "8", "app:app"]
