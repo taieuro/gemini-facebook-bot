@@ -24,13 +24,11 @@ BOT_RESUME_MINUTES = int(os.getenv('BOT_RESUME_MINUTES', '30'))
 # Tải và xử lý "chùm chìa khóa"
 PAGE_TOKEN_MAP = json.loads(PAGE_TOKENS_JSON) if PAGE_TOKENS_JSON else {}
 
-# --- PHẦN MỚI: Khởi tạo kết nối với "BỘ NÃO VĨNH VIỄN" FIRESTORE ---
+# --- Khởi tạo kết nối với "BỘ NÃO VĨNH VIỄN" FIRESTORE ---
 try:
-    # Kiểm tra xem biến môi trường có tồn tại không
     if FIREBASE_CREDENTIALS_JSON:
         cred_json = json.loads(FIREBASE_CREDENTIALS_JSON)
         cred = credentials.Certificate(cred_json)
-        # Kiểm tra xem ứng dụng Firebase đã được khởi tạo chưa
         if not firebase_admin._apps:
             firebase_admin.initialize_app(cred)
         db = firestore.client()
@@ -39,7 +37,7 @@ try:
         print("❌ Lỗi: Biến môi trường FIREBASE_CREDENTIALS_JSON không được thiết lập.")
         db = None
 except Exception as e:
-    print(f"❌ Lỗi khi kết nối Firestore: {e}")
+    print(f"❌ Lỗi khi khởi tạo Firestore: {e}")
     db = None
 
 # --- "CUỐN SÁCH KIẾN THỨC" VÀ "BỘ QUY TẮC" CỦA BOT ---
@@ -112,7 +110,7 @@ Bạn phải tuân thủ nghiêm ngặt quy trình từng bước sau, với pho
 ---
 """
 
-# --- Bước 3: Cấu hình mô hình Gemini ---
+# --- Cấu hình mô hình Gemini ---
 try:
     genai.configure(api_key=GEMINI_API_KEY)
     model = genai.GenerativeModel(
@@ -124,7 +122,7 @@ except Exception as e:
     print(f"Lỗi khi cấu hình Gemini: {e}")
     model = None
 
-# --- Bước 4: Khởi tạo ứng dụng Flask ---
+# --- Khởi tạo ứng dụng Flask ---
 app = Flask(__name__)
 
 # --- HÀM LẤY THÔNG TIN NGƯỜI DÙNG TỪ FACEBOOK ---
@@ -138,43 +136,38 @@ def get_user_profile(sender_id, page_access_token):
         print(f"Lỗi khi lấy thông tin người dùng: {e}")
     return None
 
-# --- Bước 5: Hàm gửi tin nhắn Facebook ---
+# --- Hàm gửi tin nhắn Facebook ---
 def send_message(recipient_id, message_text, page_access_token):
     params = {"access_token": page_access_token}
     headers = {"Content-Type": "application/json"}
     data = {"recipient": {"id": recipient_id}, "message": {"text": message_text}, "messaging_type": "RESPONSE"}
     requests.post("https://graph.facebook.com/v19.0/me/messages", params=params, headers=headers, json=data)
 
-# --- Bước 6: HÀM GỌI GEMINI (ĐÃ SỬA LỖI FIRESTORE) ---
+# --- Hàm gọi Gemini (sử dụng Firestore) ---
 def get_gemini_response(sender_id, prompt):
     if not model or not db:
         return "Lỗi hệ thống: Bot chưa sẵn sàng."
 
-    doc_ref = db.collection('chat_sessions').document(sender_id)
-    doc = doc_ref.get()
-    history = doc.to_dict().get('history', []) if doc.exists else []
-    
-    chat = model.start_chat(history=history)
-    
     try:
+        doc_ref = db.collection('chat_sessions').document(sender_id)
+        doc = doc_ref.get()
+        history = doc.to_dict().get('history', []) if doc.exists else []
+        
+        chat = model.start_chat(history=history)
         response = chat.send_message(prompt)
         
-        # SỬA LỖI: Chuyển đổi đối tượng history phức tạp thành định dạng đơn giản
-        # trước khi lưu vào Firestore để tránh lỗi 'Cannot convert to a Firestore Value'.
         serializable_history = [
             {'role': msg.role, 'parts': [part.text for part in msg.parts]}
             for msg in chat.history
         ]
         
-        # Cập nhật lịch sử đã được "dịch" lên Firestore
         doc_ref.set({'history': serializable_history}, merge=True)
-        
         return response.text
     except Exception as e:
-        print(f"Lỗi khi gọi API Gemini: {e}")
-        return "Xin lỗi, tôi đang gặp một chút sự cố."
+        print(f"Lỗi khi tương tác với Gemini/Firestore: {e}")
+        return "Xin lỗi, tôi đang gặp một chút sự cố kỹ thuật. Vui lòng thử lại sau giây lát."
 
-# --- Bước 7: Webhook Endpoint (sử dụng Firestore) ---
+# --- Webhook Endpoint (đã được "bọc thép") ---
 @app.route('/', methods=['GET', 'POST'])
 def webhook():
     if request.method == 'GET':
@@ -192,51 +185,54 @@ def webhook():
                 if not page_access_token: continue
 
                 for messaging_event in entry.get("messaging", []):
-                    # Xử lý tin nhắn do NHÂN VIÊN gửi
-                    if messaging_event.get("message", {}).get("is_echo") and HUMAN_TAKEOVER_ENABLED:
-                        sender_id = messaging_event["recipient"]["id"]
-                        if db:
-                            doc_ref = db.collection('chat_sessions').document(sender_id)
-                            doc_ref.set({'control': 'HUMAN', 'last_human_timestamp': firestore.SERVER_TIMESTAMP}, merge=True)
-                        continue
-
-                    # Xử lý tin nhắn do KHÁCH HÀNG gửi
-                    if messaging_event.get("message") and not messaging_event.get("message", {}).get("is_echo"):
-                        sender_id = messaging_event["sender"]["id"]
-                        message_text = messaging_event["message"].get("text")
-
-                        if not db:
-                            send_message(sender_id, "Lỗi hệ thống: Không thể kết nối đến bộ nhớ.", page_access_token)
+                    try: # <-- BỌC THÉP TOÀN BỘ LOGIC XỬ LÝ TIN NHẮN
+                        # Xử lý tin nhắn do NHÂN VIÊN gửi
+                        if messaging_event.get("message", {}).get("is_echo") and HUMAN_TAKEOVER_ENABLED:
+                            sender_id = messaging_event["recipient"]["id"]
+                            if db:
+                                doc_ref = db.collection('chat_sessions').document(sender_id)
+                                doc_ref.set({'control': 'HUMAN', 'last_human_timestamp': firestore.SERVER_TIMESTAMP}, merge=True)
                             continue
 
-                        doc_ref = db.collection('chat_sessions').document(sender_id)
-                        doc = doc_ref.get()
-                        current_state = doc.to_dict() if doc.exists else {}
-                        
-                        is_new_conversation = not doc.exists
-                        if is_new_conversation:
-                            user_name = get_user_profile(sender_id, page_access_token)
-                            doc_ref.set({'user_name': user_name, 'control': 'BOT'})
-                            current_state['user_name'] = user_name
+                        # Xử lý tin nhắn do KHÁCH HÀNG gửi
+                        if messaging_event.get("message") and not messaging_event.get("message", {}).get("is_echo"):
+                            sender_id = messaging_event["sender"]["id"]
+                            message_text = messaging_event["message"].get("text")
 
-                        should_bot_reply = True
-                        if current_state.get('control') == 'HUMAN' and HUMAN_TAKEOVER_ENABLED:
-                            should_bot_reply = False
-                            if current_state.get('last_human_timestamp'):
-                                time_since_human = datetime.now(timezone.utc) - current_state['last_human_timestamp'].replace(tzinfo=timezone.utc)
-                                if time_since_human > timedelta(minutes=BOT_RESUME_MINUTES):
-                                    doc_ref.set({'control': 'BOT'}, merge=True)
-                                    should_bot_reply = True
+                            if not db:
+                                send_message(sender_id, "Lỗi hệ thống: Không thể kết nối đến bộ nhớ.", page_access_token)
+                                continue
 
-                        if message_text and should_bot_reply:
-                            prompt_to_send = message_text
-                            if is_new_conversation and current_state.get('user_name'):
-                                prompt_to_send = f"(Tên khách hàng là {current_state['user_name']}) {message_text}"
+                            doc_ref = db.collection('chat_sessions').document(sender_id)
+                            doc = doc_ref.get()
+                            current_state = doc.to_dict() if doc.exists else {}
                             
-                            gemini_answer = get_gemini_response(sender_id, prompt_to_send)
-                            send_message(sender_id, gemini_answer, page_access_token)
+                            is_new_conversation = not doc.exists
+                            if is_new_conversation:
+                                user_name = get_user_profile(sender_id, page_access_token)
+                                doc_ref.set({'user_name': user_name, 'control': 'BOT'})
+                                current_state['user_name'] = user_name
+
+                            should_bot_reply = True
+                            if current_state.get('control') == 'HUMAN' and HUMAN_TAKEOVER_ENABLED:
+                                should_bot_reply = False
+                                if current_state.get('last_human_timestamp'):
+                                    time_since_human = datetime.now(timezone.utc) - current_state['last_human_timestamp'].replace(tzinfo=timezone.utc)
+                                    if time_since_human > timedelta(minutes=BOT_RESUME_MINUTES):
+                                        doc_ref.set({'control': 'BOT'}, merge=True)
+                                        should_bot_reply = True
+
+                            if message_text and should_bot_reply:
+                                prompt_to_send = message_text
+                                if is_new_conversation and current_state.get('user_name'):
+                                    prompt_to_send = f"(Tên khách hàng là {current_state['user_name']}) {message_text}"
+                                
+                                gemini_answer = get_gemini_response(sender_id, prompt_to_send)
+                                send_message(sender_id, gemini_answer, page_access_token)
+                    except Exception as e:
+                        print(f"LỖI NGHIÊM TRỌNG TRONG WEBHOOK: {e}")
         return "ok", 200
 
-# --- Bước 8: Chạy server (Đã được Gunicorn quản lý) ---
+# --- Chạy server (Đã được Gunicorn quản lý) ---
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001, debug=True)
