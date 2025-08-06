@@ -26,11 +26,18 @@ PAGE_TOKEN_MAP = json.loads(PAGE_TOKENS_JSON) if PAGE_TOKENS_JSON else {}
 
 # --- PHẦN MỚI: Khởi tạo kết nối với "BỘ NÃO VĨNH VIỄN" FIRESTORE ---
 try:
-    cred_json = json.loads(FIREBASE_CREDENTIALS_JSON)
-    cred = credentials.Certificate(cred_json)
-    firebase_admin.initialize_app(cred)
-    db = firestore.client()
-    print("✅ Kết nối với Firestore (bộ nhớ vĩnh viễn) thành công!")
+    # Kiểm tra xem biến môi trường có tồn tại không
+    if FIREBASE_CREDENTIALS_JSON:
+        cred_json = json.loads(FIREBASE_CREDENTIALS_JSON)
+        cred = credentials.Certificate(cred_json)
+        # Kiểm tra xem ứng dụng Firebase đã được khởi tạo chưa
+        if not firebase_admin._apps:
+            firebase_admin.initialize_app(cred)
+        db = firestore.client()
+        print("✅ Kết nối với Firestore (bộ nhớ vĩnh viễn) thành công!")
+    else:
+        print("❌ Lỗi: Biến môi trường FIREBASE_CREDENTIALS_JSON không được thiết lập.")
+        db = None
 except Exception as e:
     print(f"❌ Lỗi khi kết nối Firestore: {e}")
     db = None
@@ -138,12 +145,11 @@ def send_message(recipient_id, message_text, page_access_token):
     data = {"recipient": {"id": recipient_id}, "message": {"text": message_text}, "messaging_type": "RESPONSE"}
     requests.post("https://graph.facebook.com/v19.0/me/messages", params=params, headers=headers, json=data)
 
-# --- Bước 6: Hàm gọi Gemini (sử dụng Firestore) ---
+# --- Bước 6: HÀM GỌI GEMINI (ĐÃ SỬA LỖI FIRESTORE) ---
 def get_gemini_response(sender_id, prompt):
     if not model or not db:
         return "Lỗi hệ thống: Bot chưa sẵn sàng."
 
-    # Lấy lịch sử trò chuyện từ Firestore
     doc_ref = db.collection('chat_sessions').document(sender_id)
     doc = doc_ref.get()
     history = doc.to_dict().get('history', []) if doc.exists else []
@@ -152,8 +158,17 @@ def get_gemini_response(sender_id, prompt):
     
     try:
         response = chat.send_message(prompt)
-        # Cập nhật lịch sử mới lên Firestore
-        doc_ref.set({'history': chat.history}, merge=True)
+        
+        # SỬA LỖI: Chuyển đổi đối tượng history phức tạp thành định dạng đơn giản
+        # trước khi lưu vào Firestore để tránh lỗi 'Cannot convert to a Firestore Value'.
+        serializable_history = [
+            {'role': msg.role, 'parts': [part.text for part in msg.parts]}
+            for msg in chat.history
+        ]
+        
+        # Cập nhật lịch sử đã được "dịch" lên Firestore
+        doc_ref.set({'history': serializable_history}, merge=True)
+        
         return response.text
     except Exception as e:
         print(f"Lỗi khi gọi API Gemini: {e}")
@@ -180,8 +195,9 @@ def webhook():
                     # Xử lý tin nhắn do NHÂN VIÊN gửi
                     if messaging_event.get("message", {}).get("is_echo") and HUMAN_TAKEOVER_ENABLED:
                         sender_id = messaging_event["recipient"]["id"]
-                        doc_ref = db.collection('chat_sessions').document(sender_id)
-                        doc_ref.set({'control': 'HUMAN', 'last_human_timestamp': firestore.SERVER_TIMESTAMP}, merge=True)
+                        if db:
+                            doc_ref = db.collection('chat_sessions').document(sender_id)
+                            doc_ref.set({'control': 'HUMAN', 'last_human_timestamp': firestore.SERVER_TIMESTAMP}, merge=True)
                         continue
 
                     # Xử lý tin nhắn do KHÁCH HÀNG gửi
@@ -189,7 +205,10 @@ def webhook():
                         sender_id = messaging_event["sender"]["id"]
                         message_text = messaging_event["message"].get("text")
 
-                        # Lấy trạng thái từ Firestore
+                        if not db:
+                            send_message(sender_id, "Lỗi hệ thống: Không thể kết nối đến bộ nhớ.", page_access_token)
+                            continue
+
                         doc_ref = db.collection('chat_sessions').document(sender_id)
                         doc = doc_ref.get()
                         current_state = doc.to_dict() if doc.exists else {}
