@@ -24,21 +24,41 @@ BOT_RESUME_MINUTES = int(os.getenv('BOT_RESUME_MINUTES', '30'))
 # Tải và xử lý "chùm chìa khóa"
 PAGE_TOKEN_MAP = json.loads(PAGE_TOKENS_JSON) if PAGE_TOKENS_JSON else {}
 
-# --- Khởi tạo kết nối với "BỘ NÃO VĨNH VIỄN" FIRESTORE ---
-try:
-    if FIREBASE_CREDENTIALS_JSON:
-        cred_json = json.loads(FIREBASE_CREDENTIALS_JSON)
-        cred = credentials.Certificate(cred_json)
-        if not firebase_admin._apps:
-            firebase_admin.initialize_app(cred)
+# --- PHẦN NÂNG CẤP: Quản lý kết nối Firestore một cách linh hoạt ---
+db = None
+def initialize_firestore():
+    """
+    Hàm kiểm tra và khởi tạo kết nối Firestore một cách an toàn,
+    tránh lỗi "app already exists" khi server khởi động lại.
+    """
+    global db
+    try:
+        # Cố gắng lấy app mặc định. Nếu nó chưa tồn tại, sẽ gây ra lỗi ValueError.
+        firebase_admin.get_app()
+    except ValueError:
+        # Bắt lỗi và chỉ khởi tạo app nếu nó thực sự chưa tồn tại.
+        try:
+            if FIREBASE_CREDENTIALS_JSON:
+                cred_json = json.loads(FIREBASE_CREDENTIALS_JSON)
+                cred = credentials.Certificate(cred_json)
+                firebase_admin.initialize_app(cred)
+                print("✅ Khởi tạo kết nối Firebase Admin SDK lần đầu thành công!")
+            else:
+                print("❌ Lỗi: Biến môi trường FIREBASE_CREDENTIALS_JSON không được thiết lập.")
+                db = None
+                return
+        except Exception as e:
+            print(f"❌ Lỗi nghiêm trọng khi khởi tạo Firebase: {e}")
+            db = None
+            return
+    
+    # Bây giờ, chúng ta chắc chắn rằng app đã được khởi tạo, hãy lấy client.
+    try:
         db = firestore.client()
-        print("✅ Kết nối với Firestore (bộ nhớ vĩnh viễn) thành công!")
-    else:
-        print("❌ Lỗi: Biến môi trường FIREBASE_CREDENTIALS_JSON không được thiết lập.")
+    except Exception as e:
+        print(f"❌ Lỗi khi lấy client Firestore: {e}")
         db = None
-except Exception as e:
-    print(f"❌ Lỗi khi khởi tạo Firestore: {e}")
-    db = None
+
 
 # --- "CUỐN SÁCH KIẾN THỨC" VÀ "BỘ QUY TẮC" CỦA BOT ---
 KNOWLEDGE_BASE = """
@@ -167,9 +187,12 @@ def get_gemini_response(sender_id, prompt):
         print(f"Lỗi khi tương tác với Gemini/Firestore: {e}")
         return "Xin lỗi, tôi đang gặp một chút sự cố kỹ thuật. Vui lòng thử lại sau giây lát."
 
-# --- Webhook Endpoint (đã được "bọc thép") ---
+# --- Webhook Endpoint (đã được "bọc thép" và tối ưu) ---
 @app.route('/', methods=['GET', 'POST'])
 def webhook():
+    # Nâng cấp: Đảm bảo kết nối Firestore luôn "tươi mới" cho mỗi yêu cầu
+    initialize_firestore()
+
     if request.method == 'GET':
         token_sent = request.args.get("hub.verify_token")
         if token_sent == VERIFY_TOKEN:
@@ -185,7 +208,7 @@ def webhook():
                 if not page_access_token: continue
 
                 for messaging_event in entry.get("messaging", []):
-                    try: # <-- BỌC THÉP TOÀN BỘ LOGIC XỬ LÝ TIN NHẮN
+                    try:
                         # Xử lý tin nhắn do NHÂN VIÊN gửi
                         if messaging_event.get("message", {}).get("is_echo") and HUMAN_TAKEOVER_ENABLED:
                             sender_id = messaging_event["recipient"]["id"]
