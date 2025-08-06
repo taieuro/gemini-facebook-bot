@@ -190,7 +190,6 @@ def get_gemini_response(sender_id, prompt):
 # --- Webhook Endpoint (đã được "bọc thép" và tối ưu) ---
 @app.route('/', methods=['GET', 'POST'])
 def webhook():
-    # Nâng cấp: Đảm bảo kết nối Firestore luôn "tươi mới" cho mỗi yêu cầu
     initialize_firestore()
 
     if request.method == 'GET':
@@ -209,8 +208,13 @@ def webhook():
 
                 for messaging_event in entry.get("messaging", []):
                     try:
-                        # Xử lý tin nhắn do NHÂN VIÊN gửi
-                        if messaging_event.get("message", {}).get("is_echo") and HUMAN_TAKEOVER_ENABLED:
+                        # --- SỬA LỖI QUAN TRỌNG ---
+                        # Chỉ kích hoạt Human Takeover nếu tin nhắn là "echo" VÀ KHÔNG có "app_id"
+                        # (nghĩa là do người thật gửi, không phải do bot tự gửi)
+                        is_human_echo = (messaging_event.get("message", {}).get("is_echo") and 
+                                         "app_id" not in messaging_event.get("message", {}))
+
+                        if is_human_echo and HUMAN_TAKEOVER_ENABLED:
                             sender_id = messaging_event["recipient"]["id"]
                             if db:
                                 doc_ref = db.collection('chat_sessions').document(sender_id)
