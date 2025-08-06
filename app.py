@@ -187,7 +187,7 @@ def get_gemini_response(sender_id, prompt):
         print(f"Lỗi khi tương tác với Gemini/Firestore: {e}")
         return "Xin lỗi, tôi đang gặp một chút sự cố kỹ thuật. Vui lòng thử lại sau giây lát."
 
-# --- Webhook Endpoint (đã được "bọc thép" và tối ưu) ---
+# --- Webhook Endpoint ---
 @app.route('/', methods=['GET', 'POST'])
 def webhook():
     initialize_firestore()
@@ -208,9 +208,6 @@ def webhook():
 
                 for messaging_event in entry.get("messaging", []):
                     try:
-                        # --- SỬA LỖI QUAN TRỌNG ---
-                        # Chỉ kích hoạt Human Takeover nếu tin nhắn là "echo" VÀ KHÔNG có "app_id"
-                        # (nghĩa là do người thật gửi, không phải do bot tự gửi)
                         is_human_echo = (messaging_event.get("message", {}).get("is_echo") and 
                                          "app_id" not in messaging_event.get("message", {}))
 
@@ -221,7 +218,6 @@ def webhook():
                                 doc_ref.set({'control': 'HUMAN', 'last_human_timestamp': firestore.SERVER_TIMESTAMP}, merge=True)
                             continue
 
-                        # Xử lý tin nhắn do KHÁCH HÀNG gửi
                         if messaging_event.get("message") and not messaging_event.get("message", {}).get("is_echo"):
                             sender_id = messaging_event["sender"]["id"]
                             message_text = messaging_event["message"].get("text")
@@ -259,6 +255,12 @@ def webhook():
                     except Exception as e:
                         print(f"LỖI NGHIÊM TRỌNG TRONG WEBHOOK: {e}")
         return "ok", 200
+
+# --- PHẦN MỚI: Endpoint "Kiểm Tra Sức Khỏe" ---
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Endpoint đơn giản để các dịch vụ bên ngoài có thể "ping"."""
+    return "OK", 200
 
 # --- Chạy server (Đã được Gunicorn quản lý) ---
 if __name__ == '__main__':
