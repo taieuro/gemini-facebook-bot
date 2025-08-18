@@ -89,6 +89,7 @@ KNOWLEDGE_BASE = """
 - Điện thoại: 02837112666
 - Zalo tư vấn: 0835130333
 - Email: quatangthanhcong@gmail.com
+- Website: www.quatangthanhcong.com
 """
 
 # --- "BỘ QUY TẮC" CHO BOT (SYSTEM INSTRUCTIONS) ---
